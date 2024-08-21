@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/gorilla/mux"
 )
@@ -26,6 +27,7 @@ func (s *APIserver) Run() {
 
 	router.HandleFunc("/account", makeHTTPHandlerFunc(s.handleAcc))
 	router.HandleFunc("/account/{id}", makeHTTPHandlerFunc(s.handleGetAccByID))
+	router.HandleFunc("/transfer", makeHTTPHandlerFunc(s.handleTransfer))
 
 	log.Println("Server running on port: ", s.listenAdr)
 
@@ -39,25 +41,37 @@ func (s *APIserver) handleAcc(w http.ResponseWriter, r *http.Request) error {
 	if r.Method == "POST" {
 		return s.handleCreateAcc(w, r)
 	}
-	if r.Method == "DELETE" {
-		return s.handleDeleteAcc(w, r)
-	}
 
 	return fmt.Errorf("method not support")
 }
 
 func (s *APIserver) handleGetAcc(w http.ResponseWriter, r *http.Request) error {
-	return nil
+	accs, err := s.storeg.GetAccs()
+	if err != nil {
+		return err
+	}
+
+	return WriteJSON(w, http.StatusOK, accs)
 }
 
 func (s *APIserver) handleGetAccByID(w http.ResponseWriter, r *http.Request) error {
-	id := mux.Vars(r)["id"]
+	if r.Method == "GET" {
+		id, err := getID(r)
+		if err != nil {
+			return err
+		}
 
-	//db
+		acc, err := s.storeg.GerAccID(id)
+		if err != nil {
+			return err
+		}
 
-	fmt.Println(id)
-
-	return WriteJSON(w, http.StatusOK, &Acc{})
+		return WriteJSON(w, http.StatusOK, acc)
+	}
+	if r.Method == "DELETE" {
+		return s.handleDeleteAcc(w, r)
+	}
+	return fmt.Errorf("wrong method %s", r.Method)
 }
 
 func (s *APIserver) handleCreateAcc(w http.ResponseWriter, r *http.Request) error {
@@ -75,11 +89,25 @@ func (s *APIserver) handleCreateAcc(w http.ResponseWriter, r *http.Request) erro
 }
 
 func (s *APIserver) handleDeleteAcc(w http.ResponseWriter, r *http.Request) error {
-	return nil
+	id, err := getID(r)
+	if err != nil {
+		return err
+	}
+
+	if err := s.storeg.DeleteAcc(id); err != nil {
+		return err
+	}
+
+	return WriteJSON(w, http.StatusOK, map[string]int{"deleted": id})
 }
 
 func (s *APIserver) handleTransfer(w http.ResponseWriter, r *http.Request) error {
-	return nil
+	transfer := new(TransferReq)
+	if err := json.NewDecoder(r.Body).Decode(transfer); err != nil {
+		return err
+	}
+	defer r.Body.Close()
+	return WriteJSON(w, http.StatusOK, transfer)
 }
 
 func WriteJSON(w http.ResponseWriter, sts int, v any) error {
@@ -101,3 +129,12 @@ func makeHTTPHandlerFunc(f apiFunc) http.HandlerFunc {
 		}
 	}
 } //Декоратор apiFunc -> handlerFunc
+
+func getID(r *http.Request) (int, error) {
+	idStr := mux.Vars(r)["id"]
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return id, fmt.Errorf("invalid id given %s", idStr)
+	}
+	return id, nil
+}

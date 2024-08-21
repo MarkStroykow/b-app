@@ -73,8 +73,9 @@ func (s *StorageDB) UpdateAcc(*Acc) error {
 	return nil
 }
 
-func (s *StorageDB) DeleteAcc(in int) error {
-	return nil
+func (s *StorageDB) DeleteAcc(id int) error {
+	_, err := s.db.Query("delete from acc where id = $1", id)
+	return err
 }
 
 func (s *StorageDB) GetAccs() ([]*Acc, error) {
@@ -85,12 +86,8 @@ func (s *StorageDB) GetAccs() ([]*Acc, error) {
 
 	accs := []*Acc{}
 	for rows.Next() {
-		acc := new(Acc)
-		if err := rows.Scan(
-			&acc.ID,
-			&acc.Name,
-			&acc.Number,
-			&acc.CreatedAt); err != nil {
+		acc, err := scanInAcc(rows)
+		if err != nil {
 			return nil, err
 		}
 		accs = append(accs, acc)
@@ -100,5 +97,23 @@ func (s *StorageDB) GetAccs() ([]*Acc, error) {
 }
 
 func (s *StorageDB) GerAccID(id int) (*Acc, error) {
-	return nil, nil
+	rows, err := s.db.Query("select * from acc where id = $1", id)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		return scanInAcc(rows)
+	}
+	return nil, fmt.Errorf("account %d not found", id)
+}
+
+func scanInAcc(rows *sql.Rows) (*Acc, error) {
+	acc := new(Acc)
+	err := rows.Scan(
+		&acc.ID,
+		&acc.Name,
+		&acc.Number,
+		&acc.CreatedAt)
+
+	return acc, err
 }
