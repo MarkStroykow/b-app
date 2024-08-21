@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 
+	jwt "github.com/golang-jwt/jwt/v4"
 	"github.com/gorilla/mux"
 )
 
@@ -26,7 +28,7 @@ func (s *APIserver) Run() {
 	router := mux.NewRouter()
 
 	router.HandleFunc("/account", makeHTTPHandlerFunc(s.handleAcc))
-	router.HandleFunc("/account/{id}", makeHTTPHandlerFunc(s.handleGetAccByID))
+	router.HandleFunc("/account/{id}", withAuth(makeHTTPHandlerFunc(s.handleGetAccByID), s.storeg))
 	router.HandleFunc("/transfer", makeHTTPHandlerFunc(s.handleTransfer))
 
 	log.Println("Server running on port: ", s.listenAdr)
@@ -85,6 +87,13 @@ func (s *APIserver) handleCreateAcc(w http.ResponseWriter, r *http.Request) erro
 		return err
 	}
 
+	tokenS, err := createJWT(acc)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(tokenS)
+
 	return WriteJSON(w, http.StatusOK, acc)
 }
 
@@ -107,13 +116,83 @@ func (s *APIserver) handleTransfer(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	defer r.Body.Close()
+
 	return WriteJSON(w, http.StatusOK, transfer)
 }
 
 func WriteJSON(w http.ResponseWriter, sts int, v any) error {
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(sts)
+
 	return json.NewEncoder(w).Encode(v)
+}
+
+func createJWT(acc *Acc) (string, error) {
+	claim := &jwt.MapClaims{
+		"expiresAt": 15000,
+		"accNum":    acc.Number,
+	}
+
+	secret := os.Getenv("JWT_SECRET")
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claim)
+
+	return token.SignedString([]byte(secret))
+}
+
+//eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2NOdW0iOjE0OTY1NjYwLCJleHBpcmVzQXQiOjE1MDAwfQ.P-0iwqSlVH_GNOrd3arrYBY_CxzqbYZYkayDAdJv1Y8
+//13
+
+func withAuth(handlerFunc http.HandlerFunc, s Srorage) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("calling auth")
+
+		tokenS := r.Header.Get("JWTtoken")
+
+		token, err := validJWT(tokenS)
+		if err != nil {
+			WriteJSON(w, http.StatusOK, ApiError{Error: "invalid token"})
+			return
+		}
+
+		if !token.Valid {
+			WriteJSON(w, http.StatusOK, ApiError{Error: "invalid token(2)"})
+			return
+		}
+
+		userID, err := getID(r)
+		if err != nil {
+			WriteJSON(w, http.StatusOK, ApiError{Error: "invalid token(3)"})
+			return
+		}
+		acc, err := s.GerAccID(userID)
+		if err != nil {
+			WriteJSON(w, http.StatusOK, ApiError{Error: "invalid token(4)"})
+			return
+		}
+
+		claim := token.Claims.(jwt.MapClaims)
+
+		if acc.Number != int64(claim["accNum"].(float64)) { //Чут-чут костыль, нужен свой claim((
+			WriteJSON(w, http.StatusOK, ApiError{Error: "invalid token(5)"})
+			return
+		}
+
+		handlerFunc(w, r)
+	}
+}
+
+//const jwrSecret = "qwerty1"
+
+func validJWT(tokerS string) (*jwt.Token, error) {
+	secret := os.Getenv("JWT_SECRET")
+
+	return jwt.Parse(tokerS, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+		}
+
+		return []byte(secret), nil
+	})
 }
 
 type apiFunc func(http.ResponseWriter, *http.Request) error
