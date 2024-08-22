@@ -27,6 +27,7 @@ func NewAPIserver(listenAdr string, storeg Srorage) *APIserver {
 func (s *APIserver) Run() {
 	router := mux.NewRouter()
 
+	router.HandleFunc("/login", makeHTTPHandlerFunc(s.handleLogin))
 	router.HandleFunc("/account", makeHTTPHandlerFunc(s.handleAcc))
 	router.HandleFunc("/account/{id}", withAuth(makeHTTPHandlerFunc(s.handleGetAccByID), s.storeg))
 	router.HandleFunc("/transfer", makeHTTPHandlerFunc(s.handleTransfer))
@@ -34,6 +35,23 @@ func (s *APIserver) Run() {
 	log.Println("Server running on port: ", s.listenAdr)
 
 	http.ListenAndServe(s.listenAdr, router)
+}
+
+func (s *APIserver) handleLogin(w http.ResponseWriter, r *http.Request) error {
+	if r.Method != "POST" {
+		return fmt.Errorf("method not support")
+	}
+	var req LoginReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return err
+	}
+
+	_, err := s.storeg.GetAccByNum(int(req.Num))
+	if err != nil {
+		return err
+	}
+
+	return WriteJSON(w, http.StatusOK, req)
 }
 
 func (s *APIserver) handleAcc(w http.ResponseWriter, r *http.Request) error {
@@ -82,17 +100,14 @@ func (s *APIserver) handleCreateAcc(w http.ResponseWriter, r *http.Request) erro
 		return err
 	}
 
-	acc := NewAcc(createAccReq.Name)
-	if err := s.storeg.CreateAcc(acc); err != nil {
-		return err
-	}
-
-	tokenS, err := createJWT(acc)
+	acc, err := NewAcc(createAccReq.Name, createAccReq.Password)
 	if err != nil {
 		return err
 	}
 
-	fmt.Println(tokenS)
+	if err := s.storeg.CreateAcc(acc); err != nil {
+		return err
+	}
 
 	return WriteJSON(w, http.StatusOK, acc)
 }

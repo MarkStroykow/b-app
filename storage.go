@@ -13,6 +13,7 @@ type Srorage interface {
 	UpdateAcc(*Acc) error
 	GetAccs() ([]*Acc, error)
 	GerAccID(int) (*Acc, error)
+	GetAccByNum(int) (*Acc, error)
 }
 
 type StorageDB struct {
@@ -44,7 +45,9 @@ func (s *StorageDB) createAccTable() error {
 	id serial primary key,
 	name varchar(255),
 	num serial,
-	created_at timestamp
+	pass varchar(255),
+	created_at timestamp,
+	bal serial
 	)`
 	_, err := s.db.Exec(req)
 	return err
@@ -52,13 +55,15 @@ func (s *StorageDB) createAccTable() error {
 
 func (s *StorageDB) CreateAcc(acc *Acc) error {
 	q := `insert into acc 
-	(name, num, created_at)
-	values ($1,$2,$3)`
+	(name, num, pass, created_at, bal)
+	values ($1,$2,$3,$4,$5)`
 	resp, err := s.db.Query(
 		q,
 		acc.Name,
 		acc.Number,
-		acc.CreatedAt)
+		acc.Password,
+		acc.CreatedAt,
+		acc.Bal)
 
 	if err != nil {
 		return err
@@ -76,6 +81,17 @@ func (s *StorageDB) UpdateAcc(*Acc) error {
 func (s *StorageDB) DeleteAcc(id int) error {
 	_, err := s.db.Query("delete from acc where id = $1", id)
 	return err
+}
+
+func (s *StorageDB) GetAccByNum(num int) (*Acc, error) {
+	rows, err := s.db.Query("select * from acc where num = $1", num)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		return scanInAcc(rows)
+	}
+	return nil, fmt.Errorf("account %d not found", num)
 }
 
 func (s *StorageDB) GetAccs() ([]*Acc, error) {
